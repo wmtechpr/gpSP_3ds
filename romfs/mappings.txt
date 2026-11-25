@@ -1,0 +1,2 @@
+# GB/GBC Name Mappings
+# Format: alias=canonical_name

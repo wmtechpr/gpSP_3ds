@@ -1,0 +1,41 @@
+#ifndef _3DSTHEMES_H_
+#define _3DSTHEMES_H_
+
+#include "3dscompat.h"
+
+typedef struct 
+{
+    const char *Name;
+    uint32 menuTopBarColor;
+    uint32 selectedTabTextColor;
+    uint32 tabTextColor;
+    uint32 selectedTabIndicatorColor;
+    uint32 menuBottomBarColor;
+    uint32 menuBottomBarTextColor;
+    uint32 menuBackColor;
+    uint32 selectedItemBackColor;
+    uint32 selectedItemTextColor;
+    uint32 selectedItemDescriptionTextColor;
+    uint32 normalItemTextColor;
+    uint32 normalItemDescriptionTextColor;
+    uint32 disabledItemTextColor;
+    uint32 headerItemTextColor;
+    uint32 subtitleTextColor;
+    uint32 accentColor;
+    uint32 accentUnselectedColor;
+    uint32 dialogColorInfo;
+    uint32 dialogColorWarn;
+    uint32 dialogColorSuccess;
+    float dialogTextAlpha;
+    float dialogDisabledTextAlpha;
+    float dialogSelectedItemBackAlpha;
+} Theme3ds;
+
+#define DIALOG_TYPE_INFO 0
+#define DIALOG_TYPE_SUCCESS 1
+#define DIALOG_TYPE_WARN 2
+
+#define TOTALTHEMECOUNT 3
+extern Theme3ds Themes[TOTALTHEMECOUNT];
+
+#endif

@@ -1,0 +1,56 @@
+#include "3dsgpu.h"
+#include "3dsimpl.h"
+#include "3dslcd.h"
+#include "3dssound.h"
+#include "3dsinput.h"
+#include "3dsmenu.h"
+#include "3dssave.h"
+#include "3dsexit.h"
+#include "3dsutils.h"
+#include "3dslog.h"
+
+aptHookCookie hookCookie;
+
+void handleAptHook(APT_HookType hook, void* param)
+{
+    switch (hook) {
+        case APTHOOK_ONSUSPEND:
+        case APTHOOK_ONSLEEP:
+            lcd3dsSetBacklight(settings3DS.SecondScreen, true);
+            utils3dsRestoreCpuLimit();
+            if (session3DS.emulatorState == EMUSTATE_EMULATE) {
+                log3dsSetBuffered(false);
+                snd3dsStopPlaying(); // avoid hanging looped sample while HOME menu is open
+                lcd3dsRestoreDefaultRate();
+                // Avoids two writers on one .sav. SRAM changed since the job's copy stays dirty;
+                // exiting before gameplay resumes loses at most a moment of progress.
+                if (!sav3dsIsSRAMSaveInProgress() && sav3dsSRAMNeedsPauseSave()) {
+                    sav3dsSaveSRAMSync();
+                }
+
+                session3DS.emulatorState = EMUSTATE_PAUSEMENU;
+                session3DS.resumeAfterSuspend = true;
+                input3dsRefreshTurboMode(false);
+                // A screenshot after resume would show a later frame.
+                screenshot.pending = false;
+            }
+
+            break;
+        case APTHOOK_ONRESTORE:
+        case APTHOOK_ONWAKEUP:
+            utils3dsApplyCpuLimit();
+            GPU3DS.gameScreenBufferDesync = true;
+            menu3dsSetScreenDirty(true, true);
+            break;
+        default:
+            break;
+    }
+}
+
+void enableAptHooks() {
+    aptHook(&hookCookie, handleAptHook, NULL);
+}
+
+void disableAptHooks() {
+    aptUnhook(&hookCookie);
+}

@@ -1,0 +1,446 @@
+#---------------------------------------------------------------------------------
+.SUFFIXES:
+#---------------------------------------------------------------------------------
+
+ifeq ($(strip $(DEVKITARM)),)
+$(error "Please set DEVKITARM in your environment. export DEVKITARM=<path to>devkitARM")
+endif
+
+TOPDIR ?= $(CURDIR)
+include $(DEVKITARM)/3ds_rules
+3DS_IP		:= 192.168.1.2
+
+.DEFAULT_GOAL := 3dsx
+
+#---------------------------------------------------------------------------------
+# TARGET is the name of the output
+# BUILD is the directory where object files & intermediate files will be placed
+# SOURCES is a list of directories containing source code
+# DATA is a list of directories containing data files
+# INCLUDES is a list of directories containing header files
+# RESOURCES is the directory where AppInfo template.rsf etc can be found
+# OUTPUT is the directory where final executables will be placed
+# GRAPHICS is a list of directories containing graphics files
+# GFXBUILD is the directory where converted graphics files will be placed
+#   If set to $(BUILD), it will statically link in the converted
+#   files as if they were data files.
+#
+# NO_SMDH: if set to anything, no SMDH file is generated.
+# ROMFS is the directory which contains the RomFS, relative to the Makefile (Optional)
+# APP_TITLE is the name of the app stored in the SMDH file (Optional)
+# APP_DESCRIPTION is the description of the app stored in the SMDH file (Optional)
+# APP_AUTHOR is the author of the app stored in the SMDH file (Optional)
+# ICON is the filename of the icon (.png), relative to the project folder.
+#   If not set, it attempts to use one of the following (in this order):
+#     - <Project name>.png
+#     - icon.png
+#     - <libctru folder>/default_icon.png
+#---------------------------------------------------------------------------------
+TARGET      := gpSP_3ds
+BUILD       := build
+SOURCES     := source
+DATA        := data
+INCLUDES    := include $(SOURCES) \
+               $(SOURCES)/gpsp \
+               $(SOURCES)/gpsp/libretro/libretro-common/include
+GRAPHICS    := gfx
+OUTPUT      := output
+RESOURCES   := resources
+ROMFS       := romfs
+GFXBUILD    := $(ROMFS)/gfx
+
+#---------------------------------------------------------------------------------
+# Resource Setup
+#---------------------------------------------------------------------------------
+APP_INFO        := $(RESOURCES)/AppInfo
+BANNER          := $(RESOURCES)/banner.bnr
+ICON_IMAGE      := $(RESOURCES)/icon.png
+RSF             := $(TOPDIR)/$(RESOURCES)/app.rsf
+
+include $(TOPDIR)/$(APP_INFO)
+APP_TITLE         := $(shell echo "$(APP_TITLE)" | cut -c1-128)
+APP_DESCRIPTION   := $(shell echo "$(APP_DESCRIPTION)" | cut -c1-256)
+APP_AUTHOR        := $(shell echo "$(APP_AUTHOR)" | cut -c1-128)
+APP_PRODUCT_CODE  := $(shell echo $(APP_PRODUCT_CODE) | cut -c1-16)
+APP_UNIQUE_ID     := $(shell echo $(APP_UNIQUE_ID) | cut -c1-7)
+APP_VERSION_MAJOR := $(shell echo $(APP_VERSION_MAJOR) | cut -c1-3)
+APP_VERSION_MINOR := $(shell echo $(APP_VERSION_MINOR) | cut -c1-3)
+APP_VERSION_MICRO := $(shell echo $(APP_VERSION_MICRO) | cut -c1-3)
+APP_ROMFS         := $(TOPDIR)/$(ROMFS)
+
+#---------------------------------------------------------------------------------
+# options for code generation
+#---------------------------------------------------------------------------------
+WARNINGS           := -Wall -Wextra -Wreturn-type -Wwrite-strings -Wno-implicit-fallthrough -Wno-unused-parameter -Wno-missing-field-initializers
+STRICT_WARNINGS    ?= 1
+
+ifeq ($(STRICT_WARNINGS),1)
+WARNINGS += -Werror
+endif
+
+ARCH               := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
+OPT_FLAGS          ?= -g -O3 -ggdb
+RELEASE_OPT_FLAGS  ?= -O3
+COMMON             := $(OPT_FLAGS) $(WARNINGS) -mword-relocations -fomit-frame-pointer -ffunction-sections -DVERSION_MAJOR=$(APP_VERSION_MAJOR) -DVERSION_MINOR=$(APP_VERSION_MINOR) -DVERSION_MICRO=$(APP_VERSION_MICRO) $(ARCH) $(INCLUDE) -D__3DS__
+CFLAGS             := $(COMMON) -std=gnu99
+CXXFLAGS           := $(COMMON) -Wno-register -fno-rtti -fno-exceptions -std=gnu++17
+ASFLAGS            := -g -ggdb $(ARCH)
+LDFLAGS            = -specs=3dsx.specs $(ARCH) -Wl,-Map,$(notdir $*.map)
+
+GPSP_FLAGS         := -D_3DS -DARM11 -DARM_ARCH -DHAVE_DYNAREC -DFRONTEND_SUPPORTS_RGB565 -DHAVE_STRINGS_H -DHAVE_STDINT_H -DHAVE_INTTYPES_H -D__LIBRETRO__ -DINLINE=inline -I$(TOPDIR)/$(SOURCES)/gpsp/libretro
+
+# gpSP is third-party code, so apply its own flags without -Werror.
+gpsp/%.o: CFLAGS   := $(filter-out -Werror -Wno-register,$(CFLAGS)) -ffast-math -w $(GPSP_FLAGS)
+gpsp/%.o: CXXFLAGS := $(filter-out -Werror -Wno-register,$(CXXFLAGS)) -ffast-math -w $(GPSP_FLAGS)
+gpsp/%.o: ASFLAGS  := $(ASFLAGS) $(INCLUDE) $(GPSP_FLAGS) -Wa,-I$(TOPDIR)/$(SOURCES)/gpsp
+gpsp_bridge.o: CFLAGS += -ffast-math $(GPSP_FLAGS)
+
+#---------------------------------------------------------------------------------
+# Libraries needed to link into the executable.
+#---------------------------------------------------------------------------------
+LIBS := -lcitro3d -lctru -lpng -lz -lm
+
+#---------------------------------------------------------------------------------
+# list of directories containing libraries, this must be the top level containing
+# include and lib
+#---------------------------------------------------------------------------------
+# C3Di_RenderQueueIsDone requires the patched citro3d library.
+CITRO3D_CUSTOM    := $(TOPDIR)/libs/citro3d
+CITRO3D_REPO      := https://github.com/devkitPro/citro3d.git
+CITRO3D_TAG       := v1.7.1
+CITRO3D_PATCH     := $(TOPDIR)/patches/citro3d.patch
+CITRO3D_LIB       := $(CITRO3D_CUSTOM)/lib/libcitro3d.a
+LIBDIRS := $(CITRO3D_CUSTOM) $(PORTLIBS) $(CTRULIB)
+
+
+#---------------------------------------------------------------------------------
+# no real need to edit anything past this point unless you need to add additional
+# rules for different file extensions
+#---------------------------------------------------------------------------------
+ifneq ($(BUILD),$(notdir $(CURDIR)))
+#---------------------------------------------------------------------------------
+
+export TOPDIR      := $(CURDIR)
+export OUTPUT_DIR  := $(TOPDIR)/$(OUTPUT)
+export OUTPUT_FILE := $(OUTPUT_DIR)/$(TARGET)
+export VPATH       := $(foreach dir,$(SOURCES),$(CURDIR)/$(dir)) \
+                      $(foreach dir,$(GRAPHICS),$(CURDIR)/$(dir)) \
+                      $(foreach dir,$(DATA),$(CURDIR)/$(dir))
+
+export DEPSDIR     := $(CURDIR)/$(BUILD)
+
+GPSP_DIR           := gpsp
+GPSP_LIBRETRO_COMM := $(GPSP_DIR)/libretro/libretro-common
+GPSP_CCFILES       := $(GPSP_DIR)/video.cc $(GPSP_DIR)/cpu.cc
+GPSP_SFILES        := $(GPSP_DIR)/bios_data.S \
+                      $(GPSP_DIR)/arm/arm_stub.S \
+                      $(GPSP_DIR)/3ds/3ds_cache_utils.S
+GPSP_CFILES        := $(GPSP_DIR)/main.c \
+                      $(GPSP_DIR)/gba_memory.c \
+                      $(GPSP_DIR)/savestate.c \
+                      $(GPSP_DIR)/input.c \
+                      $(GPSP_DIR)/sound.c \
+                      $(GPSP_DIR)/cheats.c \
+                      $(GPSP_DIR)/memmap.c \
+                      $(GPSP_DIR)/serial.c \
+                      $(GPSP_DIR)/gbp.c \
+                      $(GPSP_DIR)/rfu.c \
+                      $(GPSP_DIR)/serial_proto.c \
+                      $(GPSP_DIR)/gba_cc_lut.c \
+                      $(GPSP_DIR)/cpu_threaded.c \
+                      $(GPSP_DIR)/3ds/3ds_utils.c \
+                      $(GPSP_LIBRETRO_COMM)/compat/compat_posix_string.c \
+                      $(GPSP_LIBRETRO_COMM)/compat/compat_strl.c \
+                      $(GPSP_LIBRETRO_COMM)/compat/fopen_utf8.c \
+                      $(GPSP_LIBRETRO_COMM)/encodings/encoding_utf.c \
+                      $(GPSP_LIBRETRO_COMM)/file/file_path.c \
+                      $(GPSP_LIBRETRO_COMM)/file/file_path_io.c \
+                      $(GPSP_LIBRETRO_COMM)/streams/file_stream.c \
+                      $(GPSP_LIBRETRO_COMM)/string/stdstring.c \
+                      $(GPSP_LIBRETRO_COMM)/time/rtime.c \
+                      $(GPSP_LIBRETRO_COMM)/vfs/vfs_implementation.c
+
+CFILES             := $(GPSP_CFILES) gpsp_bridge.c
+CPPFILES           := png_utils.cpp 3dspixel_utils.cpp 3dsutils.cpp 3dsmain.cpp 3dsmenu.cpp 3dstimer.cpp \
+			3dsgpu.cpp 3dssound.cpp 3dsfont.cpp 3dsglyphs.cpp 3dsui.cpp 3dsui_notif.cpp 3dsui_img.cpp 3dsimg_cache.cpp 3dsexit.cpp \
+			3dsconfig.cpp 3dsfiles.cpp 3dsinput.cpp 3dslcd.cpp \
+			3dsimpl.cpp 3dsimpl_gpu.cpp 3dssave.cpp 3dsthemes.cpp 3dssettings.cpp \
+			3dslog.cpp
+SFILES             := $(GPSP_SFILES)
+PICAFILES          := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.v.pica)))
+SHLISTFILES        := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.shlist)))
+GFXFILES           := $(foreach dir,$(GRAPHICS),$(notdir $(wildcard $(dir)/*.t3s)))
+BINFILES           := $(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.*)))
+
+#---------------------------------------------------------------------------------
+# use CXX for linking C++ projects, CC for standard C
+#---------------------------------------------------------------------------------
+ifeq ($(strip $(CPPFILES)),)
+	export LD := $(CC)
+else
+	export LD := $(CXX)
+endif
+#---------------------------------------------------------------------------------
+
+
+#---------------------------------------------------------------------------------
+ifeq ($(GFXBUILD),$(BUILD))
+#---------------------------------------------------------------------------------
+export T3XFILES	      := $(GFXFILES:.t3s=.t3x)
+#---------------------------------------------------------------------------------
+else
+#---------------------------------------------------------------------------------
+export ROMFS_T3XFILES   :=  $(patsubst %.t3s, $(GFXBUILD)/%.t3x, $(GFXFILES))
+export T3XHFILES        :=  $(patsubst %.t3s, $(BUILD)/%.h, $(GFXFILES))
+#---------------------------------------------------------------------------------
+endif
+#---------------------------------------------------------------------------------
+
+
+export OFILES_SOURCES := $(CPPFILES:.cpp=.o) $(GPSP_CCFILES:.cc=.o) $(CFILES:.c=.o) $(SFILES:.S=.o)
+export OFILES_BIN     := $(addsuffix .o,$(BINFILES)) \
+                         $(PICAFILES:.v.pica=.shbin.o) $(SHLISTFILES:.shlist=.shbin.o) \
+                         $(if $(filter $(BUILD),$(GFXBUILD)),$(addsuffix .o,$(T3XFILES)))
+export OFILES         := $(OFILES_BIN) $(OFILES_SOURCES)
+export HFILES         := $(PICAFILES:.v.pica=_shbin.h) $(SHLISTFILES:.shlist=_shbin.h) \
+                         $(addsuffix .h,$(subst .,_,$(BINFILES))) \
+                         $(GFXFILES:.t3s=.h)
+export INCLUDE        := $(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
+                         $(foreach dir,$(LIBDIRS),-I$(dir)/include) \
+                         -I$(CURDIR)/$(BUILD)
+
+
+export LIBPATHS       := $(foreach dir,$(LIBDIRS),-L$(dir)/lib)
+
+
+export _3DSXDEPS      := $(if $(NO_SMDH),,$(OUTPUT_FILE).smdh)
+
+
+#---------------------------------------------------------------------------------
+# Inclusion of RomFS folder, App Icon, and building SMDH
+#---------------------------------------------------------------------------------
+
+
+export APP_ICON_IMAGE := $(TOPDIR)/$(ICON_IMAGE)
+
+
+ifeq ($(strip $(NO_SMDH)),)
+	export _3DSXFLAGS += --smdh=$(OUTPUT_FILE).smdh
+endif
+
+
+ifneq ($(ROMFS),)
+	export _3DSXFLAGS += --romfs=$(CURDIR)/$(ROMFS)
+endif
+
+
+#---------------------------------------------------------------------------------
+# First set of targets ensure the build/output directories are created and execute
+# in the context of the BUILD directory.
+#---------------------------------------------------------------------------------
+.PHONY : clean all 3dsx cia elf 3ds citra release 3dslink
+
+
+#---------------------------------------------------------------------------------
+# citro3d: clone, patch, and build custom citro3d library
+# Patch changes reset this derived checkout; save local edits in the patch first.
+#---------------------------------------------------------------------------------
+$(CITRO3D_LIB): $(CITRO3D_PATCH)
+	@echo ""
+	@echo "=========================================="
+	@echo "  Setting up custom citro3d lib..."
+	@echo "=========================================="
+	@echo ""
+	@[ -d $(CITRO3D_CUSTOM)/.git ] || git clone $(CITRO3D_REPO) $(CITRO3D_CUSTOM)
+	@git -C $(CITRO3D_CUSTOM) rev-parse --verify --quiet refs/tags/$(CITRO3D_TAG) >/dev/null || \
+		git -C $(CITRO3D_CUSTOM) fetch --quiet origin tag $(CITRO3D_TAG)
+	@git -C $(CITRO3D_CUSTOM) checkout --quiet --force $(CITRO3D_TAG)
+	@git -C $(CITRO3D_CUSTOM) clean -fdq
+	@git -C $(CITRO3D_CUSTOM) apply $(CITRO3D_PATCH)
+	@$(MAKE) -C $(CITRO3D_CUSTOM)
+	@echo ""
+	@echo "=========================================="
+	@echo "  custom citro3d lib ready."
+	@echo "=========================================="
+	@echo ""
+
+BUILD_DEPS := $(BUILD) $(GFXBUILD) $(OUTPUT_DIR) $(ROMFS_T3XFILES) $(T3XHFILES)
+
+
+all : $(CITRO3D_LIB) $(BUILD_DEPS)
+	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
+
+
+3dsx : $(CITRO3D_LIB) $(BUILD_DEPS)
+	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile $@
+
+
+cia : $(CITRO3D_LIB) $(BUILD_DEPS)
+	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile $@
+
+
+3ds : $(CITRO3D_LIB) $(BUILD_DEPS)
+	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile $@
+
+
+elf : $(CITRO3D_LIB) $(BUILD_DEPS)
+	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile $@
+
+
+citra : $(CITRO3D_LIB) $(BUILD_DEPS)
+	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile $@
+
+
+3dslink : $(CITRO3D_LIB) $(BUILD_DEPS)
+	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile $@
+
+
+release : $(CITRO3D_LIB) $(BUILD_DEPS)
+	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile OPT_FLAGS="$(RELEASE_OPT_FLAGS)" $@
+
+
+$(BUILD):
+	@mkdir -p $@
+	@mkdir -p $@/$(GPSP_DIR)/arm $@/$(GPSP_DIR)/3ds \
+		$@/$(GPSP_LIBRETRO_COMM)/compat $@/$(GPSP_LIBRETRO_COMM)/encodings \
+		$@/$(GPSP_LIBRETRO_COMM)/file $@/$(GPSP_LIBRETRO_COMM)/streams \
+		$@/$(GPSP_LIBRETRO_COMM)/string $@/$(GPSP_LIBRETRO_COMM)/time \
+		$@/$(GPSP_LIBRETRO_COMM)/vfs
+
+
+$(GFXBUILD):
+	@mkdir -p $@
+
+
+$(OUTPUT_DIR):
+	@mkdir -p $@
+
+
+clean :
+	@echo clean ...
+	@rm -rf $(BUILD) $(OUTPUT)
+	@rm -f $(GFXBUILD)/*.t3x
+
+
+#---------------------------------------------------------------------------------
+$(GFXBUILD)/%.t3x   $(BUILD)/%.h    :   %.t3s
+#---------------------------------------------------------------------------------
+	@echo $(notdir $<)
+	@tex3ds -i $< -H $(BUILD)/$*.h -d $(DEPSDIR)/$*.d -o $(GFXBUILD)/$*.t3x
+
+
+#---------------------------------------------------------------------------------
+else
+
+DEPENDS	:=	$(OFILES:.o=.d)
+
+COMMON_MAKEROM_PARAMS := -rsf $(RSF) -target t -exefslogo -elf $(OUTPUT_FILE).elf -icon $(OUTPUT_FILE).smdh \
+-banner $(TOPDIR)/$(RESOURCES)/banner.bnr -DAPP_TITLE="$(APP_TITLE)" -DAPP_PRODUCT_CODE="$(APP_PRODUCT_CODE)" \
+-DAPP_UNIQUE_ID="$(APP_UNIQUE_ID)" -DAPP_ROMFS="$(APP_ROMFS)" -DAPP_SYSTEM_MODE="64MB" \
+-DAPP_SYSTEM_MODE_EXT="124MB" -major "$(APP_VERSION_MAJOR)" -minor "$(APP_VERSION_MINOR)" \
+-micro "$(APP_VERSION_MICRO)"
+
+ifeq ($(OS),Windows_NT)
+	MAKEROM = $(TOPDIR)/makerom/windows_x86_64/makerom.exe
+	CITRA = citra.exe
+	_3DSXTOOL = 3dsxtool.exe
+	SMDHTOOL = smdhtool.exe
+	TEX3DS = tex3ds.exe
+else
+ifeq ($(shell uname -s),Darwin)
+ifeq ($(shell uname -m),arm64)
+	MAKEROM = $(TOPDIR)/makerom/macos_arm64/makerom
+else
+	MAKEROM = $(TOPDIR)/makerom/macos_x86_64/makerom
+endif
+else
+	MAKEROM = $(TOPDIR)/makerom/linux_x86_64/makerom
+endif
+	CITRA = citra
+	_3DSXTOOL = 3dsxtool
+	SMDHTOOL = smdhtool
+	TEX3DS = tex3ds
+endif
+
+#---------------------------------------------------------------------------------
+# main targets
+#---------------------------------------------------------------------------------
+.PHONY: all 3dsx cia elf 3ds citra release
+
+$(OUTPUT_FILE).3dsx : $(OUTPUT_FILE).elf $(_3DSXDEPS)
+	$(_3DSXTOOL) $< $@ $(_3DSXFLAGS)
+	@echo built ... $(notdir $@)
+
+$(OUTPUT_FILE).smdh : $(APP_ICON_IMAGE)
+	@$(SMDHTOOL) --create "$(APP_TITLE)" "$(APP_DESCRIPTION)" "$(APP_AUTHOR)" $(APP_ICON_IMAGE) $@
+	@echo built ... $(notdir $@)
+
+$(OFILES_SOURCES) : $(HFILES)
+
+$(OUTPUT_FILE).elf : $(OFILES) $(CITRO3D_LIB)
+
+%.o: %.cc
+	$(SILENTMSG) $(notdir $<)
+	$(SILENTCMD)$(CXX) -MMD -MP -MF $(DEPSDIR)/$*.d $(_EXTRADEFS) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@ $(ERROR_FILTER)
+
+$(OUTPUT_FILE).3ds : $(OUTPUT_FILE).elf $(OUTPUT_FILE).smdh
+	@$(MAKEROM) -f cci -o $(OUTPUT_FILE).3ds -DAPP_ENCRYPTED=true $(COMMON_MAKEROM_PARAMS)
+	@echo "built ... $(notdir $@)"
+
+$(OUTPUT_FILE).cia : $(OUTPUT_FILE).elf $(OUTPUT_FILE).smdh
+	@$(MAKEROM) -f cia -o $(OUTPUT_FILE).cia -DAPP_ENCRYPTED=false $(COMMON_MAKEROM_PARAMS)
+	@echo "built ... $(notdir $@)"
+
+$(OUTPUT_FILE).zip : $(OUTPUT_FILE).smdh $(OUTPUT_FILE).3dsx
+	@cd $(OUTPUT_DIR)
+	mkdir -p 3ds/$(TARGET)
+	cp $(OUTPUT_FILE).3dsx 3ds/$(TARGET)
+	cp $(OUTPUT_FILE).smdh 3ds/$(TARGET)
+	zip -r $(OUTPUT_FILE).zip 3ds > /dev/null
+	rm -r 3ds
+	@echo built ... $(notdir $@)
+
+3dsx : $(OUTPUT_FILE).3dsx
+
+cia : $(OUTPUT_FILE).cia
+
+3ds : $(OUTPUT_FILE).3ds
+
+elf : $(OUTPUT_FILE).elf
+
+citra : 3dsx
+	$(CITRA) $(OUTPUT_FILE).3dsx
+
+3dslink : 3dsx
+	3dslink -a ${3DS_IP} $(OUTPUT_FILE).3dsx
+
+
+release : 3dsx cia
+
+#---------------------------------------------------------------------------------
+# Binary Data Rules
+#---------------------------------------------------------------------------------
+%.bin.o	%_bin.h : %.bin
+#---------------------------------------------------------------------------------
+	@echo $(notdir $<)
+	@$(bin2o)
+
+#---------------------------------------------------------------------------------
+.PRECIOUS	:	%.t3x %.shbin
+#---------------------------------------------------------------------------------
+%.t3x.o	%_t3x.h :	%.t3x
+#---------------------------------------------------------------------------------
+	$(SILENTMSG) $(notdir $<)
+	$(bin2o)
+
+#---------------------------------------------------------------------------------
+%.shbin.o %_shbin.h : %.shbin
+#---------------------------------------------------------------------------------
+	$(SILENTMSG) $(notdir $<)
+	$(bin2o)
+	
+-include $(DEPENDS) $(DEPSDIR)/*.d
+
+#---------------------------------------------------------------------------------------
+endif
+#--------------------------------------------------------------------------------------- 

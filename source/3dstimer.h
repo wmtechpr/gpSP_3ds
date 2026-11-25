@@ -1,0 +1,81 @@
+#ifndef _3DS_TIMER_H
+#define _3DS_TIMER_H
+
+#include <3ds.h>
+
+// !!! always uncomment PROFILING_DISABLED before releasing to disable any profiling !!!
+// for disabling/enabling specific profiling adjust `TimerConfigs`
+#define PROFILING_DISABLED
+
+// Number of frames per profiling window. Timers are reset and the window's
+// numbers logged every PROFILING_WINDOW_FRAMES frames.
+#define PROFILING_WINDOW_FRAMES 120
+
+typedef enum {
+    TIMER_CORE_RUN,
+    TIMER_UPLOAD_FRAME,
+    TIMER_DRAW,
+    TIMER_DRAW_SCENE,
+    TIMER_GPU_WAIT,
+    TIMER_FLUSH,
+    TIMER_RUN_ONE_FRAME,
+    TIMER_COUNT
+} TimerBucket;
+
+typedef enum {
+    PROFILING_OFF,
+    PROFILING_CORE,
+    PROFILING_ALL,
+} ProfilingMode;
+
+
+typedef struct {
+    const char *name;
+    bool isEnabled;
+} TimerConfig;
+
+typedef struct {
+    const char *name;
+    u64 startTick;
+    u64 totalTicks;
+    int calls;
+    bool isEnabled;
+} T3dsTimer;
+
+extern TimerConfig TimerConfigs[TIMER_COUNT];
+extern T3dsTimer t3dsTimers[TIMER_COUNT];
+extern ProfilingMode t3dsProfilingMode;
+
+
+static inline void t3dsStartTimer(TimerBucket bucket) {
+    #ifndef PROFILING_DISABLED
+        if (bucket == TIMER_COUNT || !t3dsTimers[bucket].isEnabled) return;
+
+        t3dsTimers[bucket].startTick = svcGetSystemTick();
+    #endif
+}
+
+static inline void t3dsStopTimer(TimerBucket bucket) {
+    #ifndef PROFILING_DISABLED
+        if (bucket == TIMER_COUNT || !t3dsTimers[bucket].isEnabled) return;
+
+        t3dsTimers[bucket].totalTicks += svcGetSystemTick() - t3dsTimers[bucket].startTick;
+        t3dsTimers[bucket].calls++;
+    #endif
+}
+
+static inline void t3dsCount(TimerBucket bucket) {
+    #ifndef PROFILING_DISABLED
+        if (bucket == TIMER_COUNT || !t3dsTimers[bucket].isEnabled) return;
+
+        t3dsTimers[bucket].calls++;
+    #endif
+}
+
+double t3dsTicksToMs(u64 ticks);
+
+void t3dsResetTimers();
+void t3dsPrintTimer(TimerBucket bucket, int totalFrames = 1);
+void t3dsPrintTimers(int totalFrames);
+
+#endif
