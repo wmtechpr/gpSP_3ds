@@ -1027,6 +1027,19 @@ void impl3dsSceneRender(bool firstFrame, bool paused, const ScreenshotRegion* sc
             vp.cHeight = cHeight;
         }
 
+        int bezelMaxW = 0, bezelMaxH = 0;
+        if (img3dsGetBuiltInBezelBounds(bezelMaxW, bezelMaxH) &&
+            (vp.sWidth > bezelMaxW || vp.cHeight > bezelMaxH)) {
+            if (vp.sWidth * bezelMaxH > vp.cHeight * bezelMaxW) {
+                vp.cHeight = (vp.cHeight * bezelMaxW + vp.sWidth / 2) / vp.sWidth;
+                vp.sWidth = bezelMaxW;
+            } else {
+                vp.sWidth = (vp.sWidth * bezelMaxH + vp.cHeight / 2) / vp.cHeight;
+                vp.cHeight = bezelMaxH;
+            }
+            vp.sHeight = vp.cHeight;
+        }
+
         vp.sx0 = (settings3DS.GameScreenWidth - vp.sWidth) / 2;
         vp.sy0 = (SCREEN_HEIGHT - vp.cHeight) / 2;
         vp.sx1 = vp.sx0 + vp.sWidth;

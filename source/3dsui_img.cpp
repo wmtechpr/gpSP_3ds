@@ -24,10 +24,10 @@
 #include "3dssave.h"
 
 #define UI_TEX_COUNT 5
-#define BEZEL_INNER_WIDTH 320
-#define BEZEL_INNER_HEIGHT 239
-#define WIDTH_SCALE 1 / BEZEL_INNER_WIDTH
-#define HEIGHT_SCALE 1 / BEZEL_INNER_HEIGHT
+#define BEZEL_INNER_WIDTH 312
+#define BEZEL_INNER_HEIGHT 208
+#define WIDTH_SCALE (1.0f / BEZEL_INNER_WIDTH)
+#define HEIGHT_SCALE (1.0f / BEZEL_INNER_HEIGHT)
 
 // min size that C3D_SyncDisplayTransfer accepts on real hardware? (8/16/32 caused freeze)
 #define SCANLINE_TEX_DIM 64
@@ -643,10 +643,30 @@ void img3dsDrawBackground(SGPU_TEXTURE_ID textureId, bool paused, float xOffset)
     img3dsDrawAsset(textureId, ctx, scale, scale, false, xOffset);
 }
 
+bool img3dsGetBuiltInBezelBounds(int& maxWidth, int& maxHeight) {
+    if (settings3DS.GameScreen != GFX_TOP ||
+        settings3DS.ScreenStretch == Setting::ScreenStretch::Full ||
+        settings3DS.GameOverlayAutoFit ||
+        settings3DS.GameOverlay == Setting::AssetMode::None ||
+        settings3DS.GameOverlay == Setting::AssetMode::CustomOnly) {
+        return false;
+    }
+
+    int idx = UI_OVERLAY - UI_TEXTURE_START;
+    if (assetState[idx].customIsActive ||
+        strncmp(assetState[idx].defaultSrc, "romfs:/", 7) != 0) {
+        return false;
+    }
+
+    maxWidth = BEZEL_INNER_WIDTH;
+    maxHeight = BEZEL_INNER_HEIGHT;
+    return true;
+}
+
 void img3dsDrawGameOverlay(SGPU_TEXTURE_ID textureId, int sWidth, int sHeight) {
     const AssetDrawContext ctx = getAssetDrawContext(textureId);
     float scaleX = (!settings3DS.GameOverlayAutoFit || sWidth == BEZEL_INNER_WIDTH) ? 1.0f : (float)sWidth * WIDTH_SCALE;
-    float scaleY = (!settings3DS.GameOverlayAutoFit || sHeight >= SCREEN_HEIGHT) ? 1.0f : (float)sHeight * HEIGHT_SCALE;
+    float scaleY = (!settings3DS.GameOverlayAutoFit || sHeight == BEZEL_INNER_HEIGHT) ? 1.0f : (float)sHeight * HEIGHT_SCALE;
 
     img3dsDrawAsset(textureId, ctx, scaleX, scaleY, true, 0);
 }

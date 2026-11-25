@@ -14,6 +14,7 @@ void img3dsDrawSplash(SGPU_TEXTURE_ID textureId, bool renderRightEye, float xOff
 void img3dsDrawPause(SGPU_TEXTURE_ID textureId, float opacity = 1.0f, float yOffset = 0.0f);
 void img3dsDrawBackground(SGPU_TEXTURE_ID textureId, bool paused = false, float xOffset = 0.0f);
 void img3dsDrawGameOverlay(SGPU_TEXTURE_ID textureId, int sWidth, int sHeight);
+bool img3dsGetBuiltInBezelBounds(int& maxWidth, int& maxHeight);
 void img3dsDrawScanlines(float sx0, float sy0, float sx1, float sy1, int sWidth, int cHeight);
 void img3dsUpdateScanlineTexture();
 
