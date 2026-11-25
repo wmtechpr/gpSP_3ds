@@ -87,7 +87,11 @@ bool gpsp_bridge_init(void) {
     g_audioSamplesPerFrame = (float)sound_frequency / GBA_FPS;
     g_audioSamplesAccum = 0.0f;
 
+    // Keep heap headroom for 3DS shell/save/UI allocations on 64 MiB (.3dsx) launches;
+    // 124 MiB (.cia) still gets the full 32 MiB ROM buffer.
+    void* heapHeadroom = malloc(6 * 1024 * 1024);
     init_gamepak_buffer();
+    free(heapHeadroom);
     if (gamepak_buffer_count == 0) {
         return false;
     }

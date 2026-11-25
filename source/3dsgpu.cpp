@@ -449,6 +449,8 @@ bool gpu3dsInitialize()
         GPU3DS.shaders[i].dvlb = NULL;
     }
 
+    gpu3dsResetState();
+
     return true;
 }
 

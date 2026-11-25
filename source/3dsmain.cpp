@@ -35,6 +35,11 @@ inline std::string operator "" _s(const char* s, size_t length) {
     return std::string(s, length);
 }
 
+// libctru's default 32 KiB main stack is too tight for ROM load + JIT/libpng call chains.
+extern "C" {
+u32 __stacksize__ = 128 * 1024;
+}
+
 char romFileName[NAME_MAX + 1];
 bool slotLoaded = false;
 

@@ -105,12 +105,12 @@ static u32 computeFileCrc32(const char* path, u32* outSize) {
     FILE* fp = file3dsOpen(path, "rb");
     if (!fp) return 0;
 
-    u8 buf[32 * 1024];
+    std::vector<u8> buf(32 * 1024);
     uLong crc = crc32(0L, Z_NULL, 0);
     u32 total = 0;
     size_t n = 0;
-    while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) {
-        crc = crc32(crc, buf, static_cast<uInt>(n));
+    while ((n = fread(buf.data(), 1, buf.size(), fp)) > 0) {
+        crc = crc32(crc, buf.data(), static_cast<uInt>(n));
         total += static_cast<u32>(n);
     }
     file3dsClose(fp);
@@ -175,6 +175,7 @@ static void clearFramebuffers() {
     g_pendingDraw = false;
 
     if (GPU3DS.textures[GAME_MAIN].tex.data) {
+        gpu3dsWaitForRenderQueue();
         gpu3dsClearTexture(&GPU3DS.textures[GAME_MAIN], 0);
     }
 }
@@ -379,12 +380,14 @@ bool impl3dsInitialize() {
     g_fbPrev.resize(GAME_FRAME_PIXELS, 0);
     g_audioOutBuf.resize(AUDIO_FRAME_OUT_CAP * 2, 0);
 
+    setupDynarecMapping();
+
     if (!gpsp_bridge_init()) {
+        teardownDynarecMapping();
         log3dsWrite("Unable to initialize gpSP core");
         return false;
     }
 
-    setupDynarecMapping();
     clearFramebuffers();
 
     log3dsWrite("gpSP core initialized");
