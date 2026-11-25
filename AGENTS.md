@@ -14,6 +14,7 @@ Onboarding and debugging guide for agents working on **gpSP_3ds**, a Nintendo 3D
 - **C isolation bridge (`source/gpsp_bridge.h`, `source/gpsp_bridge.c`):** Isolates gpSP from `<3ds.h>`. Configures `sound_freq_bits = 15` (`32,768 Hz`), `gba_screen_pixels`, built-in `open_gba_bios_rom` + optional `sdmc:/3ds/gpSP_3ds/gba_bios.bin`, `416 KiB` savestates (`GBA_STATE_MEM_SIZE`), `128 KiB` `gamepak_backup`, up to 20 active CodeBreaker cheats, and `gba_cc_lut`.
 - **Vendored core (`source/gpsp/`):** `libretro/gpsp` C/C++/ARM assembly (`cpu.cc`, `video.cc`, `cpu_threaded.c`, `arm/arm_stub.S`, `3ds/3ds_utils.c`, `3ds/3ds_cache_utils.S`, `bios_data.S`, and 10 `libretro/libretro-common/` C files; `libretro/libretro.c` is intentionally omitted). Only local patch inside `source/gpsp/` is the `#elif defined(_3DS)` `if (rom_translation_cache_ptr)` guard in `source/gpsp/main.c:119-123`.
 - **Custom citro3d (`patches/citro3d.patch` -> `libs/citro3d`):** Clones/patches `devkitPro/citro3d` `v1.7.1` to add `C3Di_RenderQueueIsDone()` and the vertex uniform dirty-bound optimization. Always update `patches/citro3d.patch`, never `libs/citro3d` directly (`Makefile:248-260` resets `libs/citro3d` when the patch changes).
+- **Custom branding assets (`resources/`, `gfx/`, `romfs/gfx/`):** Custom GBA `48x48` icon (`resources/icon.png`), 2D HOME hover banner (`resources/banner.png` -> `resources/banner.bnr` via `bannertool` with silent 22050 Hz PCM WAV), 3-column parallax splash (`gfx/splash_{logo,center,left,right}.png` -> `romfs/gfx/splash.t3x`), GBA bezel (`romfs/gfx/overlay.png`), blurred GBA box-art game background (`romfs/gfx/background_game_screen.png`), and GBA touch-screen background (`romfs/gfx/background_second_screen_{us,pal}.png`).
 - **Host tests (`tests/test_core.cpp`):** Native Linux tests covering gpSP interpreter execution on a synthetic Mode 3 + PSG ROM, `416 KiB` savestate round-trip, CodeBreaker cheat parsing, `StereoRingBuffer`, and `.cht` parsing/serialization.
 
 ---
@@ -30,6 +31,8 @@ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
   bash -c "git config --global --add safe.directory '*' && make release"
 ```
 
+When changing `resources/icon.png`, `resources/banner.bnr`, `gfx/splash_*.png`, or `romfs/gfx/*.png`, delete `romfs/gfx/splash.t3x` and `output/gpSP_3ds.{3dsx,cia,smdh}` before `make release` so `tex3ds`, `smdhtool`, `3dsxtool`, and `makerom` repackage the updated assets (`Makefile` only lists `.elf`/`.smdh` as prerequisites of `.3dsx`/`.cia`).
+
 ### Verify ELF Segment Bounds & `arm_stub.S` `.bss` Layout
 
 Note: `devkitpro/devkitarm` does not put ARM binutils on default `PATH` in non-login shells; invoke `/opt/devkitpro/devkitARM/bin/arm-none-eabi-*` directly:
@@ -43,8 +46,8 @@ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
 ```
 
 Expected invariants (verified on `output/gpSP_3ds.elf`):
-- `LOAD` segment 3 (`0x00292000`, `MemSiz 0x1d5b1c`) ends at `0x00467b1c`, leaving `ram_translation_cache` (`0x01580000`, 512 KiB) and `rom_translation_cache` (`0x01600000..0x02000000`, 10 MiB) uncollided.
-- `arm_stub.S` fixed offsets relative to `reg` (`0x004573b0`) hold: `iwram` `-0xA8000`, `vram` `-0x98000`, `ewram` `-0x80000`, `spsr` `+0x100`, `st_lookup_tables` `+0x118`, `reg_mode` `+0x400`, `oam_ram` `+0x500`, `palette_ram` `+0x900`, `memory_map_read` `+0xD00`, `io_registers` `+0x8D00`, `palette_ram_converted` `+0x9100`.
+- `LOAD` segment 3 (`0x00292000`, `MemSiz 0x1d5b3c`) ends at `0x00467b3c`, leaving `ram_translation_cache` (`0x01580000`, 512 KiB) and `rom_translation_cache` (`0x01600000..0x02000000`, 10 MiB) uncollided.
+- `arm_stub.S` fixed offsets relative to `reg` (`0x004573d0`) hold: `iwram` `-0xA8000`, `vram` `-0x98000`, `ewram` `-0x80000`, `spsr` `+0x100`, `st_lookup_tables` `+0x118`, `reg_mode` `+0x400`, `oam_ram` `+0x500`, `palette_ram` `+0x900`, `memory_map_read` `+0xD00`, `io_registers` `+0x8D00`, `palette_ram_converted` `+0x9100`.
 
 ### Host Self-Tests (Linux, Interpreter Mode)
 
@@ -87,10 +90,13 @@ rm -rf /tmp/gpsp_host_obj && mkdir -p /tmp/gpsp_host_obj && (
 4. **PICA200 frame & texture rules:** `C3D_SyncDisplayTransfer` must run **outside** `C3D_FrameBegin..C3D_FrameEnd` after `gpu3dsWaitForRenderQueue()`. Because `DISPLAY_TRANSFER_FLAGS` uses `GX_TRANSFER_FLIP_VERT(0)`, `GAME_MAIN` (`256x256`) uses inverted V coordinates (`ty0 = 256`, `ty1 = 96` in `source/3dsimpl.cpp:987-988, 1037-1038`).
 5. **Savestates & audio ring:** Do **not** call `sound_flush_ring()` inside `gpsp_bridge_unserialize()`; clearing gpSP's internal ring wipes restored audio state and stalls frame 1 audio output.
 6. **JIT fallback guard:** Keep the `#elif defined(_3DS)` `if (rom_translation_cache_ptr)` guard in `source/gpsp/main.c:119-123` so unprivileged launches and Citra/Azahar (`device3DS.isReal3DS == false`) do not write to unmapped `0x01600000` inside `init_dynarec_caches()` / `init_emitter()`.
+7. **Built-in bezel geometry & touch BG safe zone (`source/3dsui_img.cpp:27-30`, `source/3dsimpl.cpp`):** `BEZEL_INNER_WIDTH = 312`, `BEZEL_INNER_HEIGHT = 208` (centered transparent cutout `x=44..355, y=16..223` in `400x240` `romfs/gfx/overlay.png`). `img3dsGetBuiltInBezelBounds()` fits scaled game viewports inside `312x208` only when the built-in `romfs:/` bezel is active, `GameScreen == GFX_TOP`, `ScreenStretch != Full`, and `GameOverlayAutoFit == false`, leaving custom SD overlays untouched. `background_second_screen_{us,pal}.png` (`400x240`) renders centered on the `320x240` bottom screen (`sx0 = -40`), so main visual subjects must stay within `x = 40..360`.
 
 ---
 
 ## 4. Real-Hardware Fixes Applied & Ongoing Diagnostics
+
+Custom icon/bezel/touch BG (`aaab048`) and HOME banner/splash/in-game BG (`7253b1e`) were built cleanly with `make release` (new HOME banner & splash await visual check on real 3DS).
 
 ### Applied Fixes
 
